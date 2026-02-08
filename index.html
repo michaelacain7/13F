@@ -1,0 +1,1028 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>13F Filing Monitor</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0a0e17;
+            --bg-secondary: #111827;
+            --bg-card: #151d2e;
+            --bg-card-hover: #1a2438;
+            --border: #1e293b;
+            --border-active: #334155;
+            --text-primary: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --accent: #00d4aa;
+            --accent-dim: #00d4aa22;
+            --accent-glow: #00d4aa44;
+            --red: #ef4444;
+            --red-dim: #ef444422;
+            --orange: #f59e0b;
+            --orange-dim: #f59e0b22;
+            --blue: #3b82f6;
+            --blue-dim: #3b82f622;
+            --green: #22c55e;
+            --green-dim: #22c55e22;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'DM Sans', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* ── Scanline overlay ── */
+        body::after {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: repeating-linear-gradient(
+                0deg,
+                transparent,
+                transparent 2px,
+                rgba(0, 212, 170, 0.015) 2px,
+                rgba(0, 212, 170, 0.015) 4px
+            );
+            pointer-events: none;
+            z-index: 9999;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        /* ── Header ── */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 20px 0 32px;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 32px;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .logo {
+            width: 48px;
+            height: 48px;
+            background: linear-gradient(135deg, var(--accent), #00a888);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 700;
+            font-size: 18px;
+            color: var(--bg-primary);
+            box-shadow: 0 0 24px var(--accent-glow);
+        }
+
+        .header-title h1 {
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+        }
+
+        .header-title p {
+            font-size: 13px;
+            color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .status-badge.active {
+            background: var(--accent-dim);
+            color: var(--accent);
+            border: 1px solid var(--accent);
+        }
+
+        .status-badge.inactive {
+            background: var(--orange-dim);
+            color: var(--orange);
+            border: 1px solid var(--orange);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        .status-badge.active .status-dot { background: var(--accent); }
+        .status-badge.inactive .status-dot { background: var(--orange); animation: none; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        /* ── Stats Row ── */
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 32px;
+        }
+
+        .stat-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            transition: border-color 0.2s;
+        }
+
+        .stat-card:hover { border-color: var(--border-active); }
+
+        .stat-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace;
+            margin-bottom: 8px;
+        }
+
+        .stat-value {
+            font-size: 28px;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .stat-sub {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        /* ── Add Filer Section ── */
+        .add-section {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 32px;
+        }
+
+        .add-section h2 {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .add-section p {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-bottom: 16px;
+        }
+
+        .input-row {
+            display: flex;
+            gap: 12px;
+        }
+
+        .input-field {
+            flex: 1;
+            padding: 12px 16px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .input-field:focus { border-color: var(--accent); }
+
+        .input-field::placeholder { color: var(--text-muted); }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-family: 'DM Sans', sans-serif;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            white-space: nowrap;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: var(--bg-primary);
+        }
+
+        .btn-primary:hover {
+            background: #00e8bb;
+            box-shadow: 0 0 20px var(--accent-glow);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover {
+            border-color: var(--border-active);
+            color: var(--text-primary);
+        }
+
+        .btn-danger {
+            background: var(--red-dim);
+            color: var(--red);
+            border: 1px solid transparent;
+        }
+
+        .btn-danger:hover {
+            border-color: var(--red);
+        }
+
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
+        /* ── Filers Table ── */
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+        }
+
+        .section-header h2 {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .filers-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 32px;
+        }
+
+        .filers-table thead th {
+            padding: 14px 20px;
+            text-align: left;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .filers-table tbody td {
+            padding: 16px 20px;
+            font-size: 14px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .filers-table tbody tr:last-child td { border-bottom: none; }
+
+        .filers-table tbody tr:hover { background: var(--bg-card-hover); }
+
+        .filer-name {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .filer-cik {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .tag {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 500;
+        }
+
+        .tag-green { background: var(--green-dim); color: var(--green); }
+        .tag-blue { background: var(--blue-dim); color: var(--blue); }
+
+        .actions-cell {
+            display: flex;
+            gap: 8px;
+        }
+
+        /* ── Changes Panel ── */
+        .changes-panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            margin-bottom: 32px;
+            overflow: hidden;
+        }
+
+        .changes-header {
+            padding: 20px 24px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .changes-header h3 { font-size: 15px; font-weight: 600; }
+
+        .changes-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0;
+        }
+
+        .changes-section {
+            padding: 20px 24px;
+            border-right: 1px solid var(--border);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .changes-section:nth-child(2n) { border-right: none; }
+        .changes-section:nth-last-child(-n+2) { border-bottom: none; }
+
+        .changes-section-title {
+            font-size: 12px;
+            font-family: 'JetBrains Mono', monospace;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .changes-section-title.new-color { color: var(--accent); }
+        .changes-section-title.added-color { color: var(--green); }
+        .changes-section-title.reduced-color { color: var(--orange); }
+        .changes-section-title.closed-color { color: var(--red); }
+
+        .holding-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--border);
+            font-size: 13px;
+        }
+
+        .holding-item:last-child { border-bottom: none; }
+
+        .holding-ticker {
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 600;
+        }
+
+        .holding-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .holding-name {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        /* ── Alert Log ── */
+        .alert-log {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 32px;
+        }
+
+        .alert-log-header {
+            padding: 20px 24px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .alert-log-header h2 { font-size: 16px; font-weight: 600; }
+
+        .alert-item {
+            padding: 14px 24px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            font-size: 13px;
+        }
+
+        .alert-item:last-child { border-bottom: none; }
+
+        .alert-time {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: var(--text-muted);
+            min-width: 140px;
+        }
+
+        .alert-filer { font-weight: 600; min-width: 200px; }
+
+        .alert-stats {
+            display: flex;
+            gap: 12px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+        }
+
+        .alert-stats span { padding: 2px 6px; border-radius: 3px; }
+
+        /* ── Empty State ── */
+        .empty-state {
+            text-align: center;
+            padding: 60px 24px;
+            color: var(--text-muted);
+        }
+
+        .empty-state .icon { font-size: 48px; margin-bottom: 16px; }
+        .empty-state p { font-size: 14px; max-width: 400px; margin: 0 auto; }
+
+        /* ── Loading spinner ── */
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--bg-primary);
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ── Toast ── */
+        .toast-container {
+            position: fixed;
+            top: 24px;
+            right: 24px;
+            z-index: 10000;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .toast {
+            padding: 14px 20px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            animation: slideIn 0.3s ease-out;
+            max-width: 400px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+        }
+
+        .toast-success {
+            background: var(--accent-dim);
+            border: 1px solid var(--accent);
+            color: var(--accent);
+        }
+
+        .toast-error {
+            background: var(--red-dim);
+            border: 1px solid var(--red);
+            color: var(--red);
+        }
+
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        /* ── Modal ── */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.7);
+            backdrop-filter: blur(4px);
+            z-index: 5000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-overlay.active { display: flex; }
+
+        .modal {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 32px;
+            max-width: 700px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .modal h3 {
+            font-size: 18px;
+            margin-bottom: 20px;
+        }
+
+        /* ── Responsive ── */
+        @media (max-width: 768px) {
+            .stats-row { grid-template-columns: repeat(2, 1fr); }
+            .changes-grid { grid-template-columns: 1fr; }
+            .changes-section { border-right: none; }
+            .input-row { flex-direction: column; }
+            .header { flex-direction: column; gap: 16px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="header-left">
+                <div class="logo">13F</div>
+                <div class="header-title">
+                    <h1>13F Filing Monitor</h1>
+                    <p id="clock">Loading...</p>
+                </div>
+            </div>
+            <div id="statusBadge" class="status-badge inactive">
+                <span class="status-dot"></span>
+                <span id="statusText">INITIALIZING</span>
+            </div>
+        </div>
+
+        <!-- Stats -->
+        <div class="stats-row">
+            <div class="stat-card">
+                <div class="stat-label">Monitored Filers</div>
+                <div class="stat-value" id="statFilers">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Checks Today</div>
+                <div class="stat-value" id="statChecks">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Last Check</div>
+                <div class="stat-value" id="statLastCheck" style="font-size:16px;">—</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Alerts Sent</div>
+                <div class="stat-value" id="statAlerts">0</div>
+            </div>
+        </div>
+
+        <!-- Add Filer -->
+        <div class="add-section">
+            <h2>Add 13F Filer to Monitor</h2>
+            <p>Enter a CIK number or SEC EDGAR URL for the filer you want to monitor for new 13F-HR filings.</p>
+            <div class="input-row">
+                <input type="text" class="input-field" id="filerInput"
+                    placeholder="e.g. 1067983 or https://www.sec.gov/cgi-bin/browse-edgar?CIK=1067983&type=13F-HR">
+                <button class="btn btn-primary" id="addBtn" onclick="addFiler()">
+                    <span id="addBtnText">Add Filer</span>
+                </button>
+                <button class="btn btn-secondary" onclick="testAlert()">Test Alert</button>
+            </div>
+        </div>
+
+        <!-- Filers Table -->
+        <div class="section-header">
+            <h2>Monitored Filers</h2>
+        </div>
+        <div id="filersContainer">
+            <div class="empty-state">
+                <div class="icon">📋</div>
+                <p>No filers being monitored. Add a CIK number or EDGAR URL above to start tracking 13F filings.</p>
+            </div>
+        </div>
+
+        <!-- Changes Panel (shown when viewing a filer) -->
+        <div id="changesContainer"></div>
+
+        <!-- Alert Log -->
+        <div class="alert-log" id="alertLogSection" style="display:none;">
+            <div class="alert-log-header">
+                <h2>📡 Alert History</h2>
+            </div>
+            <div id="alertLogBody">
+                <div class="empty-state" style="padding:30px;">
+                    <p>No alerts sent yet.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Changes Modal -->
+    <div class="modal-overlay" id="changesModal">
+        <div class="modal">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+                <h3 id="modalTitle">Holdings Changes</h3>
+                <button class="btn btn-secondary btn-sm" onclick="closeModal()">✕ Close</button>
+            </div>
+            <div id="modalBody"></div>
+        </div>
+    </div>
+
+    <script>
+        // ── State ──
+        let filers = [];
+        let alerts = [];
+
+        // ── Toast Notifications ──
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 4000);
+        }
+
+        // ── API Calls ──
+        async function fetchStatus() {
+            try {
+                const r = await fetch('/api/status');
+                const data = await r.json();
+
+                document.getElementById('clock').textContent = `${data.current_time_est} · ${data.current_day}`;
+                document.getElementById('statFilers').textContent = data.filer_count;
+                document.getElementById('statChecks').textContent = data.checks_today;
+
+                if (data.last_check) {
+                    const d = new Date(data.last_check);
+                    document.getElementById('statLastCheck').textContent = d.toLocaleTimeString();
+                }
+
+                const badge = document.getElementById('statusBadge');
+                const statusText = document.getElementById('statusText');
+
+                if (data.market_hours && data.filer_count > 0) {
+                    badge.className = 'status-badge active';
+                    statusText.textContent = 'SCANNING';
+                } else if (!data.market_hours) {
+                    badge.className = 'status-badge inactive';
+                    statusText.textContent = 'AFTER HOURS';
+                } else {
+                    badge.className = 'status-badge inactive';
+                    statusText.textContent = 'IDLE';
+                }
+            } catch (e) {
+                console.error('Status fetch error:', e);
+            }
+        }
+
+        async function fetchFilers() {
+            try {
+                const r = await fetch('/api/filers');
+                filers = await r.json();
+                renderFilers();
+            } catch (e) {
+                console.error('Filers fetch error:', e);
+            }
+        }
+
+        async function fetchAlerts() {
+            try {
+                const r = await fetch('/api/alerts');
+                alerts = await r.json();
+                renderAlerts();
+            } catch (e) {
+                console.error('Alerts fetch error:', e);
+            }
+        }
+
+        async function addFiler() {
+            const input = document.getElementById('filerInput').value.trim();
+            if (!input) return;
+
+            const btn = document.getElementById('addBtn');
+            const btnText = document.getElementById('addBtnText');
+            btn.disabled = true;
+            btnText.innerHTML = '<span class="spinner"></span> Adding...';
+
+            try {
+                const r = await fetch('/api/filers', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ input }),
+                });
+                const data = await r.json();
+
+                if (data.success) {
+                    showToast(`Added ${data.name} (${data.total_holdings} holdings, last filed ${data.last_filing_date})`);
+                    document.getElementById('filerInput').value = '';
+                    fetchFilers();
+                } else {
+                    showToast(data.error || 'Failed to add filer', 'error');
+                }
+            } catch (e) {
+                showToast('Network error: ' + e.message, 'error');
+            }
+
+            btn.disabled = false;
+            btnText.textContent = 'Add Filer';
+        }
+
+        async function removeFiler(cik) {
+            if (!confirm('Remove this filer from monitoring?')) return;
+            try {
+                const r = await fetch(`/api/filers/${cik}`, { method: 'DELETE' });
+                const data = await r.json();
+                if (data.success) {
+                    showToast(data.message);
+                    fetchFilers();
+                }
+            } catch (e) {
+                showToast('Error removing filer', 'error');
+            }
+        }
+
+        async function forceCheck(cik) {
+            try {
+                showToast('Running force check...');
+                const r = await fetch(`/api/filers/${cik}/force-check`, { method: 'POST' });
+                const data = await r.json();
+                if (data.success) {
+                    showToast(data.message);
+                    fetchFilers();
+                    fetchAlerts();
+                }
+            } catch (e) {
+                showToast('Error running force check', 'error');
+            }
+        }
+
+        async function viewChanges(cik, name) {
+            try {
+                const r = await fetch(`/api/filers/${cik}/changes`);
+                const data = await r.json();
+
+                document.getElementById('modalTitle').textContent = `${name} — Holdings Changes`;
+                const body = document.getElementById('modalBody');
+
+                if (!data.new && !data.increased && !data.decreased && !data.closed) {
+                    body.innerHTML = '<div class="empty-state" style="padding:20px"><p>No changes detected yet. Changes will appear when a new 13F filing is detected and compared with the previous quarter.</p></div>';
+                } else {
+                    body.innerHTML = renderChangesHTML(data);
+                }
+
+                document.getElementById('changesModal').classList.add('active');
+            } catch (e) {
+                showToast('Error loading changes', 'error');
+            }
+        }
+
+        async function testAlert() {
+            try {
+                const r = await fetch('/api/test-alert', { method: 'POST' });
+                const data = await r.json();
+                if (data.success) showToast('Test alert sent to Discord');
+            } catch (e) {
+                showToast('Error sending test alert', 'error');
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('changesModal').classList.remove('active');
+        }
+
+        // ── Rendering ──
+        function formatDollars(val) {
+            if (val >= 1e9) return `$${(val / 1e9).toFixed(2)}B`;
+            if (val >= 1e6) return `$${(val / 1e6).toFixed(2)}M`;
+            if (val >= 1e3) return `$${(val / 1e3).toFixed(1)}K`;
+            return `$${val.toLocaleString()}`;
+        }
+
+        function renderFilers() {
+            const container = document.getElementById('filersContainer');
+
+            if (filers.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="icon">📋</div>
+                        <p>No filers being monitored. Add a CIK number or EDGAR URL above to start tracking 13F filings.</p>
+                    </div>`;
+                return;
+            }
+
+            let html = `
+                <table class="filers-table">
+                    <thead>
+                        <tr>
+                            <th>Filer</th>
+                            <th>CIK</th>
+                            <th>Last Filing</th>
+                            <th>Holdings</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>`;
+
+            for (const f of filers) {
+                html += `
+                    <tr>
+                        <td>
+                            <div class="filer-name">${escapeHtml(f.name)}</div>
+                        </td>
+                        <td><span class="filer-cik">${f.cik}</span></td>
+                        <td>${f.last_filing_date || '—'}</td>
+                        <td><span class="tag tag-blue">${f.total_holdings || 0} positions</span></td>
+                        <td>
+                            <div class="actions-cell">
+                                <button class="btn btn-secondary btn-sm" onclick="viewChanges('${f.cik}', '${escapeHtml(f.name)}')">View Changes</button>
+                                <button class="btn btn-secondary btn-sm" onclick="forceCheck('${f.cik}')">Force Check</button>
+                                <button class="btn btn-danger btn-sm" onclick="removeFiler('${f.cik}')">Remove</button>
+                            </div>
+                        </td>
+                    </tr>`;
+            }
+
+            html += '</tbody></table>';
+            container.innerHTML = html;
+        }
+
+        function renderChangesHTML(data) {
+            let html = '<div class="changes-grid">';
+
+            // New Positions
+            html += '<div class="changes-section">';
+            html += `<div class="changes-section-title new-color">🆕 NEW POSITIONS (${(data.new || []).length})</div>`;
+            if (data.new && data.new.length) {
+                for (const h of data.new.slice(0, 20)) {
+                    const val = h.value_dollars || (h.value_thousands * 1000);
+                    html += `<div class="holding-item">
+                        <div>
+                            <span class="holding-ticker" style="color:var(--accent)">${escapeHtml(h.ticker || h.cusip)}</span>
+                            <span class="holding-name">${escapeHtml(h.name || '')}</span>
+                        </div>
+                        <span class="holding-value">${formatDollars(val)}</span>
+                    </div>`;
+                }
+            } else {
+                html += '<div style="color:var(--text-muted);font-size:13px;">None</div>';
+            }
+            html += '</div>';
+
+            // Increased Positions
+            html += '<div class="changes-section">';
+            html += `<div class="changes-section-title added-color">📈 ADDED TO (${(data.increased || []).length})</div>`;
+            if (data.increased && data.increased.length) {
+                for (const h of data.increased.slice(0, 20)) {
+                    const pct = h.prev_shares ? ((h.curr_shares - h.prev_shares) / h.prev_shares * 100).toFixed(1) : '∞';
+                    html += `<div class="holding-item">
+                        <div>
+                            <span class="holding-ticker" style="color:var(--green)">${escapeHtml(h.ticker || h.cusip)}</span>
+                            <span class="holding-name">+${pct}% shares</span>
+                        </div>
+                        <span class="holding-value">${formatDollars(h.value_change || 0)}</span>
+                    </div>`;
+                }
+            } else {
+                html += '<div style="color:var(--text-muted);font-size:13px;">None</div>';
+            }
+            html += '</div>';
+
+            // Reduced Positions
+            html += '<div class="changes-section">';
+            html += `<div class="changes-section-title reduced-color">📉 REDUCED (${(data.decreased || []).length})</div>`;
+            if (data.decreased && data.decreased.length) {
+                for (const h of data.decreased.slice(0, 20)) {
+                    const pct = h.prev_shares ? ((h.prev_shares - h.curr_shares) / h.prev_shares * 100).toFixed(1) : '0';
+                    html += `<div class="holding-item">
+                        <div>
+                            <span class="holding-ticker" style="color:var(--orange)">${escapeHtml(h.ticker || h.cusip)}</span>
+                            <span class="holding-name">-${pct}% shares</span>
+                        </div>
+                        <span class="holding-value">-${formatDollars(Math.abs(h.value_change || 0))}</span>
+                    </div>`;
+                }
+            } else {
+                html += '<div style="color:var(--text-muted);font-size:13px;">None</div>';
+            }
+            html += '</div>';
+
+            // Closed Positions
+            html += '<div class="changes-section">';
+            html += `<div class="changes-section-title closed-color">🚫 CLOSED (${(data.closed || []).length})</div>`;
+            if (data.closed && data.closed.length) {
+                for (const h of data.closed.slice(0, 20)) {
+                    const val = h.value_dollars || (h.value_thousands * 1000);
+                    html += `<div class="holding-item">
+                        <div>
+                            <span class="holding-ticker" style="color:var(--red)">${escapeHtml(h.ticker || h.cusip)}</span>
+                            <span class="holding-name">${escapeHtml(h.name || '')}</span>
+                        </div>
+                        <span class="holding-value">${formatDollars(val)}</span>
+                    </div>`;
+                }
+            } else {
+                html += '<div style="color:var(--text-muted);font-size:13px;">None</div>';
+            }
+            html += '</div>';
+
+            html += '</div>';
+            return html;
+        }
+
+        function renderAlerts() {
+            const section = document.getElementById('alertLogSection');
+            const body = document.getElementById('alertLogBody');
+
+            if (alerts.length === 0) {
+                section.style.display = 'none';
+                return;
+            }
+
+            section.style.display = 'block';
+            document.getElementById('statAlerts').textContent = alerts.length;
+
+            let html = '';
+            for (const a of alerts) {
+                html += `
+                    <div class="alert-item">
+                        <span class="alert-time">${a.time || ''}</span>
+                        <span class="alert-filer">${escapeHtml(a.filer || '')}</span>
+                        <div class="alert-stats">
+                            <span style="background:var(--accent-dim);color:var(--accent);">${a.new_positions || 0} new</span>
+                            <span style="background:var(--green-dim);color:var(--green);">${a.increased || 0} added</span>
+                            <span style="background:var(--orange-dim);color:var(--orange);">${a.decreased || 0} reduced</span>
+                            <span style="background:var(--red-dim);color:var(--red);">${a.closed || 0} closed</span>
+                        </div>
+                    </div>`;
+            }
+            body.innerHTML = html;
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        // ── Enter key support ──
+        document.getElementById('filerInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') addFiler();
+        });
+
+        // ── Polling ──
+        async function poll() {
+            await Promise.all([fetchStatus(), fetchFilers(), fetchAlerts()]);
+        }
+
+        poll();
+        setInterval(poll, 10000);  // Refresh every 10 seconds
+
+        // Click outside modal to close
+        document.getElementById('changesModal').addEventListener('click', (e) => {
+            if (e.target === document.getElementById('changesModal')) closeModal();
+        });
+    </script>
+</body>
+</html>
