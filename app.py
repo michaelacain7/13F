@@ -687,9 +687,64 @@ ticker_cache = {}
 
 
 def get_ticker(cusip, name=""):
+    """Resolve CUSIP to ticker. Tries SEC name match first, then OpenFIGI."""
     if cusip in ticker_cache:
         return ticker_cache[cusip]
-    ticker = cusip_to_ticker(cusip)
+
+    ticker = None
+
+    # Strategy 1: Match issuer name against SEC company_tickers.json (fast, free)
+    if name:
+        tickers_data = get_company_tickers()
+        if tickers_data:
+            # Normalize: lowercase, strip punctuation, collapse whitespace
+            def normalize(s):
+                s = s.lower().replace(".", " ").replace(",", " ").replace("/", " ")
+                s = re.sub(r'[^a-z0-9\s]', '', s)
+                return " ".join(s.split())
+
+            name_norm = normalize(name)
+            name_words = set(name_norm.split())
+            first_word = name_norm.split()[0] if name_norm else ""
+
+            best_match = None
+            best_score = 0
+
+            for rec in tickers_data.get("entries", []):
+                rec_ticker = rec.get("ticker", "")
+                if not rec_ticker:
+                    continue
+                rec_norm = normalize(rec["name"])
+
+                # Exact match
+                if rec_norm == name_norm:
+                    best_match = rec_ticker
+                    break
+
+                # One contains the other
+                if name_norm in rec_norm or rec_norm in name_norm:
+                    score = min(len(name_norm), len(rec_norm)) / max(len(name_norm), len(rec_norm), 1)
+                    if score > best_score and score > 0.4:
+                        best_score = score
+                        best_match = rec_ticker
+
+                # Word overlap with first-word anchor
+                rec_words = set(rec_norm.split())
+                rec_first = rec_norm.split()[0] if rec_norm else ""
+                if first_word and first_word == rec_first and len(first_word) > 2:
+                    overlap = name_words & rec_words
+                    score = len(overlap) / max(len(name_words), len(rec_words), 1)
+                    if score > best_score and score > 0.3:
+                        best_score = score
+                        best_match = rec_ticker
+
+            if best_match:
+                ticker = best_match
+
+    # Strategy 2: OpenFIGI API (has rate limits, but resolves CUSIPs reliably)
+    if not ticker:
+        ticker = cusip_to_ticker(cusip)
+
     ticker_cache[cusip] = ticker
     return ticker
 
@@ -764,6 +819,19 @@ def compare_holdings(prev_holdings, curr_holdings):
 
 # ── Discord Alert ────────────────────────────────────────────────────────────
 
+def is_resolved_ticker(ticker):
+    """Check if a ticker looks like a real ticker vs an unresolved CUSIP."""
+    if not ticker:
+        return False
+    # CUSIPs are 9 chars (6 alpha + 2 digits + 1 check), tickers are 1-5
+    if len(ticker) > 6:
+        return False
+    # CUSIPs typically end in digits
+    if len(ticker) == 9 and ticker[-1].isdigit():
+        return False
+    return True
+
+
 def format_dollar(amount):
     if amount >= 1_000_000_000:
         return f"${amount / 1_000_000_000:.2f}B"
@@ -774,15 +842,26 @@ def format_dollar(amount):
     return f"${amount:,.0f}"
 
 
-def send_discord_alert(filer_name, cik, filing_date, changes):
+def send_discord_alert(filer_name, cik, filing_date, changes, accession=""):
     new_pos = changes["new"]
     increased = changes["increased"]
     closed = changes["closed"]
     decreased = changes["decreased"]
 
+    # Build filing link
+    filing_link = ""
+    if accession:
+        acc_no_dashes = accession.replace("-", "")
+        padded = pad_cik(cik)
+        filing_link = f"https://www.sec.gov/Archives/edgar/data/{padded}/{acc_no_dashes}/{accession}-index.htm"
+
+    desc = f"**{filer_name}** (CIK: {cik})\nFiling Date: {filing_date}"
+    if filing_link:
+        desc += f"\n[📄 View Filing on EDGAR]({filing_link})"
+
     main_embed = {
         "title": "New 13F Filing Detected",
-        "description": f"**{filer_name}** (CIK: {cik})\nFiling Date: {filing_date}",
+        "description": desc,
         "color": 0x00D4AA,
         "timestamp": datetime.now(EST).isoformat(),
         "footer": {"text": "13F Monitor"},
@@ -800,10 +879,17 @@ def send_discord_alert(filer_name, cik, filing_date, changes):
         lines = []
         for key, h in sorted(new_pos.items(), key=lambda x: x[1]["value_dollars"], reverse=True)[:15]:
             ticker = h["ticker"]
+            name = h.get("name", "")
             val = format_dollar(h["value_dollars"])
             shares = f"{h['shares']:,}" if h['shares'] else "N/A"
             pc = f" ({h['put_call']})" if h.get('put_call') else ""
-            lines.append(f"**{ticker}**{pc} - {val} ({shares} shares)")
+            # Show ticker + name, or just name if ticker is still a CUSIP
+            is_real_ticker = is_resolved_ticker(ticker)
+            if is_real_ticker:
+                label = f"**{ticker}**{pc} ({name})" if name else f"**{ticker}**{pc}"
+            else:
+                label = f"**{name or ticker}**{pc}"
+            lines.append(f"{label} - {val} ({shares} shares)")
         if len(new_pos) > 15:
             lines.append(f"*...and {len(new_pos) - 15} more*")
         fields.append({"name": f"New Positions ({len(new_pos)})", "value": "\n".join(lines), "inline": False})
@@ -812,9 +898,15 @@ def send_discord_alert(filer_name, cik, filing_date, changes):
         lines = []
         for key, h in sorted(increased.items(), key=lambda x: abs(x[1]["value_change"]), reverse=True)[:15]:
             ticker = h["ticker"]
+            name = h.get("name", "")
             change = format_dollar(abs(h["value_change"]))
             share_pct = ((h["curr_shares"] - h["prev_shares"]) / h["prev_shares"] * 100) if h["prev_shares"] else 0
-            lines.append(f"**{ticker}** - +{change} (+{share_pct:.1f}% shares)")
+            is_real_ticker = is_resolved_ticker(ticker)
+            if is_real_ticker:
+                label = f"**{ticker}** ({name})" if name else f"**{ticker}**"
+            else:
+                label = f"**{name or ticker}**"
+            lines.append(f"{label} - +{change} (+{share_pct:.1f}% shares)")
         if len(increased) > 15:
             lines.append(f"*...and {len(increased) - 15} more*")
         fields.append({"name": f"Added To ({len(increased)})", "value": "\n".join(lines), "inline": False})
@@ -823,8 +915,14 @@ def send_discord_alert(filer_name, cik, filing_date, changes):
         lines = []
         for key, h in sorted(closed.items(), key=lambda x: x[1]["value_dollars"], reverse=True)[:10]:
             ticker = h["ticker"]
+            name = h.get("name", "")
             val = format_dollar(h["value_dollars"])
-            lines.append(f"**{ticker}** - {val}")
+            is_real_ticker = is_resolved_ticker(ticker)
+            if is_real_ticker:
+                label = f"**{ticker}** ({name})" if name else f"**{ticker}**"
+            else:
+                label = f"**{name or ticker}**"
+            lines.append(f"{label} - {val}")
         if len(closed) > 10:
             lines.append(f"*...and {len(closed) - 10} more*")
         fields.append({"name": f"Closed Positions ({len(closed)})", "value": "\n".join(lines), "inline": False})
@@ -833,9 +931,15 @@ def send_discord_alert(filer_name, cik, filing_date, changes):
         lines = []
         for key, h in sorted(decreased.items(), key=lambda x: abs(x[1]["value_change"]), reverse=True)[:10]:
             ticker = h["ticker"]
+            name = h.get("name", "")
             change = format_dollar(abs(h["value_change"]))
             share_pct = ((h["prev_shares"] - h["curr_shares"]) / h["prev_shares"] * 100) if h["prev_shares"] else 0
-            lines.append(f"**{ticker}** - -{change} (-{share_pct:.1f}% shares)")
+            is_real_ticker = is_resolved_ticker(ticker)
+            if is_real_ticker:
+                label = f"**{ticker}** ({name})" if name else f"**{ticker}**"
+            else:
+                label = f"**{name or ticker}**"
+            lines.append(f"{label} - -{change} (-{share_pct:.1f}% shares)")
         if len(decreased) > 10:
             lines.append(f"*...and {len(decreased) - 10} more*")
         fields.append({"name": f"Reduced Positions ({len(decreased)})", "value": "\n".join(lines), "inline": False})
@@ -1041,7 +1145,7 @@ def check_filer(cik, filer_data):
                 time.sleep(0.5)
 
         changes = compare_holdings(prev_holdings, curr_holdings)
-        send_discord_alert(filer_data["name"], cik, latest["date"], changes)
+        send_discord_alert(filer_data["name"], cik, latest["date"], changes, accession=latest_accession)
 
         filer_data["last_filing_accession"] = latest_accession
         filer_data["holdings_prev"] = curr_holdings
